@@ -1,4 +1,5 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status, Depends
+from fastapi.middleware.cors import CORSMiddleware  # NEW IMPORT
 from sqlalchemy.orm import Session
 from app.schemas import DroneTelemetry
 from app.websocket_manager import ConnectionManager
@@ -9,11 +10,23 @@ from app.models import TelemetryLog
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="SwarmRescue Gateway")
+
+# NEW: CONFIGURING CORS MIDDLEWARE 
+# This unlocks your API lanes so the React team can fetch the data securely
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all frontend origins (React, Vite, Live Server)
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows GET, POST, OPTIONS, etc.
+    allow_headers=["*"],  # Allows all browser headers
+)
+
 manager = ConnectionManager()
 
 @app.get("/")
 def health_check():
     return {"status": "healthy"}
+
 
 # ENDPOINT 1: HTTP POST INGESTION (Saves Drone Data to DB) 
 @app.post("/api/v1/telemetry", status_code=status.HTTP_202_ACCEPTED)
@@ -37,7 +50,7 @@ async def receive_drone_telemetry(payload: DroneTelemetry, db: Session = Depends
     await manager.broadcast(payload.dict())
     return {"status": "saved_and_ingested", "record_id": db_log.id}
 
-#  NEW ENDPOINT 2: HTTP GET HISTORY (For the Frontend Dashboard) ---
+#  NEW ENDPOINT 2: HTTP GET HISTORY (For the Frontend Dashboard)
 @app.get("/api/v1/telemetry/history")
 def get_telemetry_history(drone_id: int = None, db: Session = Depends(get_db)):
     """
