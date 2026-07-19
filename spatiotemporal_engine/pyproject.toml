@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spatiotemporal_engine"
+version = "0.1.0"
+description = "Spatiotemporal integration engine for SwarmRescue"
+requires-python = ">=3.10"
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
