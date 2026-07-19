@@ -1,24 +1,22 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status, Depends
-from fastapi.middleware.cors import CORSMiddleware  # NEW IMPORT
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, status, Depends, HTTPException  # Updated imports
+from fastapi.middleware.cors import CORSMiddleware 
 from sqlalchemy.orm import Session
 from app.schemas import DroneTelemetry
 from app.websocket_manager import ConnectionManager
 from app.database import engine, Base, get_db
 from app.models import TelemetryLog
 
-# Automatically generate the database file and tables on startup
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="SwarmRescue Gateway")
 
-# NEW: CONFIGURING CORS MIDDLEWARE 
-# This unlocks your API lanes so the React team can fetch the data securely
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all frontend origins (React, Vite, Live Server)
+    allow_origins=["*"],  
     allow_credentials=True,
-    allow_methods=["*"],  # Allows GET, POST, OPTIONS, etc.
-    allow_headers=["*"],  # Allows all browser headers
+    allow_methods=["*"],  
+    allow_headers=["*"],  
 )
 
 manager = ConnectionManager()
@@ -28,10 +26,25 @@ def health_check():
     return {"status": "healthy"}
 
 
-# ENDPOINT 1: HTTP POST INGESTION (Saves Drone Data to DB) 
+# ENDPOINT 1: HTTP POST INGESTION (Saves Drone Data to DB with Validation Guardrails) 
 @app.post("/api/v1/telemetry", status_code=status.HTTP_202_ACCEPTED)
 async def receive_drone_telemetry(payload: DroneTelemetry, db: Session = Depends(get_db)):
-    coords_str = ",".join(map(str, payload.coords))
+    
+    # 🛑 GUARDRAIL: Validate that coordinates contain exactly 3 elements (X, Y, Z)
+    if not payload.coords or len(payload.coords) != 3:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="Invalid coordinate format. Payload must contain exactly three numerical values [X, Y, Z]."
+        )
+        
+    try:
+        # Double-checks that all coordinate values can be cast to floats successfully
+        coords_str = ",".join(map(str, [float(x) for x in payload.coords]))
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Coordinates must be numeric values (integers or floats)."
+        )
     
     db_log = TelemetryLog(
         drone_id=payload.drone_id,
@@ -50,7 +63,8 @@ async def receive_drone_telemetry(payload: DroneTelemetry, db: Session = Depends
     await manager.broadcast(payload.dict())
     return {"status": "saved_and_ingested", "record_id": db_log.id}
 
-#  NEW ENDPOINT 2: HTTP GET HISTORY (For the Frontend Dashboard)
+
+# ENDPOINT 2: HTTP GET HISTORY (For the Frontend Dashboard)
 @app.get("/api/v1/telemetry/history")
 def get_telemetry_history(drone_id: int = None, db: Session = Depends(get_db)):
     """
@@ -76,6 +90,7 @@ def get_telemetry_history(drone_id: int = None, db: Session = Depends(get_db)):
         })
         
     return formatted_logs
+
 
 # ENDPOINT 3: WEBSOCKET STREAM 
 @app.websocket("/ws/mission-control")
