@@ -6,17 +6,19 @@ from app.websocket_manager import ConnectionManager
 from app.database import engine, Base, get_db
 from app.models import TelemetryLog
 
+# Automatically generate the database file and tables on startup
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="SwarmRescue Gateway")
 
-
+# CONFIGURING CORS MIDDLEWARE 
+# This unlocks your API lanes so the React team can fetch the data securely
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  
+    allow_origins=["*"],  # Allows all frontend origins (React, Vite, Live Server)
     allow_credentials=True,
-    allow_methods=["*"],  
-    allow_headers=["*"],  
+    allow_methods=["*"],  # Allows GET, POST, OPTIONS, etc.
+    allow_headers=["*"],  # Allows all browser headers
 )
 
 manager = ConnectionManager()
@@ -38,7 +40,7 @@ async def receive_drone_telemetry(payload: DroneTelemetry, db: Session = Depends
         )
         
     try:
-        # Double-checks that all coordinate values can be cast to floats successfully
+        # Double-check that all coordinate values can be cast to floats successfully
         coords_str = ",".join(map(str, [float(x) for x in payload.coords]))
     except (ValueError, TypeError):
         raise HTTPException(
