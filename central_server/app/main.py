@@ -5,11 +5,23 @@ from app.schemas import DroneTelemetry
 from app.websocket_manager import ConnectionManager
 from app.database import engine, Base, get_db
 from app.models import TelemetryLog
+import logging
 
 # Automatically generate the database file and tables on startup
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="SwarmRescue Gateway")
+
+# Configure the logging format
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.StreamHandler(), # Prints clean logs to your terminal
+        logging.FileHandler("swarm_rescue.log") # Automatically saves logs to a file!
+    ]
+)
+logger = logging.getLogger("SwarmRescue")
 
 # CONFIGURING CORS MIDDLEWARE 
 # This unlocks your API lanes so the React team can fetch the data securely
@@ -56,11 +68,19 @@ async def receive_drone_telemetry(payload: DroneTelemetry, db: Session = Depends
         fire_detected=payload.fire_detected
     )
     
-    db.add(db_log)
-    db.commit()
-    db.refresh(db_log)
-    
-    print(f"💾 Saved to DB -> Drone {payload.drone_id} committed record ID: {db_log.id}")
+    # 🛡️ DATABASE TRANSACTION FAIL-SAFE BLOCK
+    try:
+        db.add(db_log)
+        db.commit()
+        db.refresh(db_log)
+        logger.info(f"Database Commit Success -> Drone {payload.drone_id} logged record ID: {db_log.id}")
+    except Exception as e:
+        db.rollback()  # ⏪ Reverts any partial changes so the session doesn't corrupt
+        logger.error(f"Database Transaction Failed for Drone {payload.drone_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal Server Error: Database write operation failed."
+        )
     
     await manager.broadcast(payload.dict())
     return {"status": "saved_and_ingested", "record_id": db_log.id}
